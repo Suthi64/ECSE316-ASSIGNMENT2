@@ -11,7 +11,7 @@ from PIL import Image
 
 
 
-# ---------------------- Utility functions ----------------------
+#Utility functions
 
 def next_power_of_two(n: int) -> int:
     """Return the smallest power of two >= n."""
@@ -31,7 +31,31 @@ def pad_to_shape(image: np.ndarray, target_shape: Tuple[int, int]) -> np.ndarray
     return out
 
 
-# ---------------------- 1D DFT / FFT implementations ----------------------
+def fftshift(x: np.ndarray) -> np.ndarray:
+    """Shift zero-frequency component to center of spectrum."""
+    if x.ndim == 1:
+        n = x.shape[0]
+        return np.roll(x, n // 2)
+    elif x.ndim == 2:
+        h, w = x.shape
+        return np.roll(np.roll(x, h // 2, axis=0), w // 2, axis=1)
+    else:
+        raise ValueError("fftshift only supports 1D and 2D arrays")
+
+
+def ifftshift(x: np.ndarray) -> np.ndarray:
+    """Inverse of fftshift."""
+    if x.ndim == 1:
+        n = x.shape[0]
+        return np.roll(x, -(n // 2))
+    elif x.ndim == 2:
+        h, w = x.shape
+        return np.roll(np.roll(x, -(h // 2), axis=0), -(w // 2), axis=1)
+    else:
+        raise ValueError("ifftshift only supports 1D and 2D arrays")
+
+
+# 1D DFT / FFT implementations
 
 def naive_dft(x: np.ndarray) -> np.ndarray:
     """Naive O(N^2) 1D DFT."""
@@ -98,7 +122,7 @@ def inverse_fft(X: np.ndarray) -> np.ndarray:
     return x
 
 
-# ---------------------- 2D transforms ----------------------
+# 2D transforms
 
 def dft2d(matrix: np.ndarray) -> np.ndarray:
     """2D DFT via naive 1D DFT on rows then columns."""
@@ -137,21 +161,23 @@ def fft2d(matrix: np.ndarray, use_naive: bool = False) -> np.ndarray:
 
 
 def ifft2d(matrix: np.ndarray) -> np.ndarray:
-    """2D inverse FFT via inverse 1D FFT on columns then rows."""
+    """2D inverse FFT via inverse 1D FFT on rows then columns."""
     matrix = np.asarray(matrix, dtype=np.complex128)
     h, w = matrix.shape
 
+    # First: inverse FFT on rows
     out = np.zeros((h, w), dtype=np.complex128)
-    for c in range(w):
-        out[:, c] = inverse_fft(matrix[:, c])
-
-    out2 = np.zeros_like(out)
     for r in range(h):
-        out2[r, :] = inverse_fft(out[r, :])
+        out[r, :] = inverse_fft(matrix[r, :])
+
+    # Second: inverse FFT on columns
+    out2 = np.zeros_like(out)
+    for c in range(w):
+        out2[:, c] = inverse_fft(out[:, c])
     return out2
 
 
-# ---------------------- Image helpers ----------------------
+# Image helpers
 
 def load_grayscale_image(path: str) -> np.ndarray:
     """Load a grayscale image as float64 in [0,1] using PIL."""
@@ -180,7 +206,7 @@ def show_image_pair(left: np.ndarray, right: np.ndarray,
     plt.show()
 
 
-# ---------------------- Modes implementations ----------------------
+# Modes implementations 
 
 def mode_display_fft(img: np.ndarray, fft_kind: str = 'MS'):
     """
@@ -204,15 +230,15 @@ def mode_display_fft(img: np.ndarray, fft_kind: str = 'MS'):
 
     col = 2
 
-    # -------- Custom fft2d, match old "FFT Magnitude Spectrum" look --------
+    # Custom fft2d, match old "FFT Magnitude Spectrum" look 
     if fft_kind in ('MS', 'both'):
         F = fft2d(padded, use_naive=False)
 
-        # log(1 + |F|) like your original code
+        # log(1 + |F|) 
         mag_log = np.array([[math.log(1.0 + abs(z)) for z in row] for row in F])
 
         # shift DC to center
-        mag_shift = np.fft.fftshift(mag_log)
+        mag_shift = fftshift(mag_log)
 
         # linear normalize to [0,1]
         mag_min = mag_shift.min()
@@ -230,11 +256,11 @@ def mode_display_fft(img: np.ndarray, fft_kind: str = 'MS'):
         if fft_kind == 'both':
             col += 1
 
-    # -------- NumPy fft2, separate styling (LogNorm etc) --------
+    # NumPy fft2, separate styling (LogNorm etc)
     if fft_kind in ('numpy', 'both'):
-        F_np = np.fft.fft2(padded)
+        F_np = fft2d(padded, use_naive=False)
         mag_np = np.abs(F_np)
-        mag_shift_np = np.fft.fftshift(mag_np)
+        mag_shift_np = fftshift(mag_np)
 
         eps = 1e-8
         plt.subplot(1, ncols, col)
@@ -244,9 +270,6 @@ def mode_display_fft(img: np.ndarray, fft_kind: str = 'MS'):
 
     plt.tight_layout()
     plt.show()
-
-
-
 
 def mode_denoise(img: np.ndarray, cutoff_ratio: float = 0.08):
     """
@@ -259,7 +282,7 @@ def mode_denoise(img: np.ndarray, cutoff_ratio: float = 0.08):
     padded = pad_to_shape(img, (th, tw))
 
     F = fft2d(padded, use_naive=False)
-    Fshift = np.fft.fftshift(F)
+    Fshift = fftshift(F)
 
     cy, cx = th // 2, tw // 2
     radius = int(min(th, tw) * cutoff_ratio)
@@ -275,7 +298,7 @@ def mode_denoise(img: np.ndarray, cutoff_ratio: float = 0.08):
     print(f"DENOISE: kept {after_nonzero}/{total_coeffs} coefficients "
           f"({after_nonzero / total_coeffs:.4f})")
 
-    Funshift = np.fft.ifftshift(Fshift_filtered)
+    Funshift = ifftshift(Fshift_filtered)
     recon = ifft2d(Funshift).real
 
     recon_cropped = recon[:h, :w]
@@ -416,7 +439,7 @@ def mode_runtime_plot(max_power: int = 10, trials: int = 10):
     plt.show()
 
 
-# ---------------------- CLI ----------------------
+# CLI
 
 def main():
     parser = argparse.ArgumentParser(description="FFT assignment tool")
