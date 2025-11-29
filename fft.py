@@ -250,7 +250,7 @@ def mode_display_fft(img: np.ndarray, fft_kind: str = 'MS'):
 
         plt.subplot(1, ncols, col)
         plt.imshow(mag_norm, cmap='gray', vmin=0, vmax=1)
-        plt.title("Custom fft2d |F| (log)")
+        plt.title("FFT2D Magnitude Spectrum")
         plt.axis('off')
 
         if fft_kind == 'both':
@@ -265,7 +265,7 @@ def mode_display_fft(img: np.ndarray, fft_kind: str = 'MS'):
         eps = 1e-8
         plt.subplot(1, ncols, col)
         plt.imshow(mag_shift_np + eps, cmap='gray', norm=LogNorm())
-        plt.title("NumPy fft2 |F| (log)")
+        plt.title("NumPy FFT2")
         plt.axis('off')
 
     plt.tight_layout()
@@ -277,6 +277,10 @@ def mode_denoise(img: np.ndarray, cutoff_ratio: float = 0.08):
     Denoise by low pass filtering in the frequency domain.
     cutoff_ratio controls radius as a fraction of min dimension.
     """
+    mode_extra_filters(img,
+                   cutoff_pixels=50,    # Adjust this for low/high pass radius
+                   threshold=0,     # Adjust this for magnitude threshold
+                   topk=500)            #
     h, w = img.shape
     th, tw = next_power_of_two(h), next_power_of_two(w)
     padded = pad_to_shape(img, (th, tw))
@@ -371,70 +375,184 @@ def mode_compress(img: np.ndarray):
     plt.tight_layout()
     plt.show()
 
+def mode_extra_filters(img: np.ndarray,
+                       cutoff_pixels: int = 50,
+                       threshold: float = 1000.0,
+                       topk: int = 500):
+    """
+    Show:
+      - Low pass filter with radius = cutoff_pixels
+      - High pass filter with radius = cutoff_pixels
+      - Magnitude thresholding with given threshold
+      - Keep topk Fourier coefficients by magnitude
+      - Low pass + threshold combined
+    Together with the original image in a 6 panel figure.
+    """
+    h, w = img.shape
+    th, tw = next_power_of_two(h), next_power_of_two(w)
+    padded = pad_to_shape(img, (th, tw))
 
-def mode_runtime_plot(max_power: int = 10, trials: int = 10):
+    # FFT and shift to center
+    F = fft2d(padded, use_naive=False)
+    Fshift = fftshift(F)
+    H, W = Fshift.shape
+
+    # Helper to reconstruct an image from a boolean mask in the shifted spectrum
+    def reconstruct(mask: np.ndarray) -> np.ndarray:
+        Fmasked = Fshift * mask
+        Funshift = ifftshift(Fmasked)
+        recon = ifft2d(Funshift).real
+        recon = recon[:h, :w]
+        recon = np.clip(recon, 0.0, 1.0)
+        return recon
+
+    # Build radial masks for low pass and high pass
+    cy, cx = H // 2, W // 2
+    Y, X = np.ogrid[:H, :W]
+    r2 = (X - cx) ** 2 + (Y - cy) ** 2
+    lp_mask = r2 <= cutoff_pixels ** 2
+    hp_mask = ~lp_mask
+
+    # 1) Low pass
+    img_lp = reconstruct(lp_mask)
+
+    # 2) High pass
+    img_hp = reconstruct(hp_mask)
+
+    # 3) Magnitude thresholding
+    mag = np.abs(Fshift)
+    th_mask = mag >= threshold
+    img_th = reconstruct(th_mask)
+
+    # 4) Keep top-k coefficients by magnitude
+    flat_mag = mag.ravel()
+    topk = min(topk, flat_mag.size)
+    kth = np.partition(flat_mag, -topk)[-topk]   # magnitude cutoff
+    top_mask = mag >= kth
+    img_top = reconstruct(top_mask)
+
+    # 5) Low pass and threshold combined
+    combined_mask = lp_mask & th_mask
+    img_combined = reconstruct(combined_mask)
+
+    # Plot 6 panels
+    fig, axes = plt.subplots(1, 6, figsize=(18, 4))
+
+    axes[0].imshow(img, cmap="gray", vmin=0, vmax=1)
+    axes[0].set_title("Original Image")
+    axes[0].axis("off")
+
+    axes[1].imshow(img_lp, cmap="gray", vmin=0, vmax=1)
+    axes[1].set_title(f"Low pass (cutoff={cutoff_pixels})")
+    axes[1].axis("off")
+
+    axes[2].imshow(img_hp, cmap="gray", vmin=0, vmax=1)
+    axes[2].set_title(f"High pass (cutoff={cutoff_pixels})")
+    axes[2].axis("off")
+
+    axes[3].imshow(img_th, cmap="gray", vmin=0, vmax=1)
+    axes[3].set_title(f"Magnitude Thresholding (threshold={int(threshold)})")
+    axes[3].axis("off")
+
+    axes[4].imshow(img_top, cmap="gray", vmin=0, vmax=1)
+    axes[4].set_title(f"Keep Top {topk} Coefs")
+    axes[4].axis("off")
+
+    axes[5].imshow(img_combined, cmap="gray", vmin=0, vmax=1)
+    axes[5].set_title(f"Low-Pass & Threshold (cutoff={cutoff_pixels}, threshold={int(threshold)})")
+    axes[5].axis("off")
+
+    plt.tight_layout()
+    plt.show()
+
+
+def mode_runtime_plot(max_power: int = 8, trials: int = 10):
     """
     Mode 4.
-    Compare runtime of naive 2D DFT and FFT for N x N matrices.
-    Sizes: 2^5 up to 2^max_power (default 2^10).
+    Measure and plot runtime of naive 2D DFT and FFT for N x N matrices.
+    Problem sizes are powers of two from 2^3 up to 2^8 (that is, max 256 x 256).
+    The max_power argument is capped at 8 to avoid larger sizes.
     """
-    sizes = [2 ** p for p in range(5, max_power + 1)]
+    # Hard cap at 2^8 = 256
+    max_power = min(max_power, 8)
+
+    # Problem sizes: 2^3, 2^4, ..., 2^max_power
+    sizes = [2 ** p for p in range(3, max_power + 1)]
+
     naive_means, naive_stds = [], []
     fft_means, fft_stds = [], []
 
+    print("Starting Runtime Complexity Analysis for Naive DFT and FFT...")
+
     for N in sizes:
-        print(f"\nMeasuring N={N} x {N}")
+        print(f"\nProblem Size: {N} x {N}")
         naive_times = []
         fft_times = []
 
-        for t in range(trials):
-            A = np.random.randn(N, N)
+        for run in range(trials):
+            # Random complex matrix
+            A = np.random.randn(N, N) + 1j * np.random.randn(N, N)
 
-            # Naive only for moderate sizes
-            if N <= 256:
-                start = time.time()
-                _ = fft2d(A, use_naive=True)
-                naive_times.append(time.time() - start)
-            else:
-                naive_times.append(float("nan"))
+            # Naive 2D DFT
+            start = time.time()
+            _ = fft2d(A, use_naive=True)
+            end = time.time()
+            naive_times.append(end - start)
+            print(f"  Run {run + 1} naive: {naive_times[-1]:.4f} s")
 
+            # FFT 2D
             start = time.time()
             _ = fft2d(A, use_naive=False)
-            fft_times.append(time.time() - start)
+            end = time.time()
+            fft_times.append(end - start)
+            print(f"  Run {run + 1} FFT:   {fft_times[-1]:.4f} s")
 
-        naive_times_np = np.array(naive_times)
-        fft_times_np = np.array(fft_times)
+        naive_times = np.array(naive_times)
+        fft_times = np.array(fft_times)
 
-        naive_means.append(np.nanmean(naive_times_np))
-        naive_stds.append(np.nanstd(naive_times_np))
-        fft_means.append(np.mean(fft_times_np))
-        fft_stds.append(np.std(fft_times_np))
+        naive_mean = naive_times.mean()
+        naive_std = naive_times.std()
+        fft_mean = fft_times.mean()
+        fft_std = fft_times.std()
 
-        print(f"  Naive mean: {naive_means[-1]:.4e} s, "
-              f"std: {naive_stds[-1]:.4e}")
-        print(f"  FFT   mean: {fft_means[-1]:.4e} s, "
-              f"std: {fft_stds[-1]:.4e}")
+        naive_means.append(naive_mean)
+        naive_stds.append(naive_std)
+        fft_means.append(fft_mean)
+        fft_stds.append(fft_std)
 
-    # plotting
-    plt.figure()
-    plt.errorbar(sizes, fft_means, yerr=fft_stds, label="FFT (Cooley–Tukey)")
+        print(f"Naive DFT2D  - mean {naive_mean:.4e} s, std {naive_std:.4e} s")
+        print(f"FFT2D       - mean {fft_mean:.4e} s, std {fft_std:.4e} s")
 
-    # naive only where not nan
-    sizes_naive = [s for s, m in zip(sizes, naive_means) if not math.isnan(m)]
-    naive_means_plot = [m for m in naive_means if not math.isnan(m)]
-    naive_stds_plot = [s for s in naive_stds if not math.isnan(s)]
-
-    if sizes_naive:
-        plt.errorbar(sizes_naive, naive_means_plot, yerr=naive_stds_plot,
-                     label="Naive DFT")
+    # Plot like your reference figure
+    plt.figure(figsize=(10, 6))
+    plt.errorbar(
+        sizes,
+        naive_means,
+        yerr=2 * np.array(naive_stds),
+        label="Naive DFT",
+        marker="o",
+        capsize=5,
+    )
+    plt.errorbar(
+        sizes,
+        fft_means,
+        yerr=2 * np.array(fft_stds),
+        label="FFT",
+        marker="s",
+        capsize=5,
+    )
 
     plt.xscale("log", base=2)
     plt.yscale("log")
-    plt.xlabel("Problem size N (matrix N x N)")
+
+    # x tick labels: 2^3, 2^4, ...
+    plt.xticks(sizes, [f"$2^{int(math.log2(n))}$" for n in sizes])
+
+    plt.xlabel("Problem Size (N)")
     plt.ylabel("Runtime (seconds)")
-    plt.title("Runtime comparison: Naive 2D DFT vs FFT")
+    plt.title("Runtime Complexity of Naive DFT vs FFT")
     plt.legend()
-    plt.grid(True, which="both", linestyle="--", alpha=0.5)
+    plt.grid(True, which="both", linestyle="--", linewidth=0.5)
     plt.tight_layout()
     plt.show()
 
