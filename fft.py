@@ -32,7 +32,7 @@ def pad_to_shape(image: np.ndarray, target_shape: Tuple[int, int]) -> np.ndarray
 
 
 def fftshift(x: np.ndarray) -> np.ndarray:
-    """Shift zero-frequency component to center of spectrum."""
+    """Shift zero-frequency component to center of a 1D OR 2D array."""
     if x.ndim == 1:
         n = x.shape[0]
         return np.roll(x, n // 2)
@@ -55,10 +55,10 @@ def ifftshift(x: np.ndarray) -> np.ndarray:
         raise ValueError("ifftshift only supports 1D and 2D arrays")
 
 
-# 1D DFT / FFT implementations
+# 1D DFT/FFT implementations and their Corresponding Inverse Transforms
 
 def naive_dft(x: np.ndarray) -> np.ndarray:
-    """Naive O(N^2) 1D DFT."""
+    """Compute the 1D DFT."""
     x = np.asarray(x, dtype=np.complex128)
     N = x.shape[0]
     X = np.zeros(N, dtype=np.complex128)
@@ -72,7 +72,7 @@ def naive_dft(x: np.ndarray) -> np.ndarray:
 
 
 def naive_idft(X: np.ndarray) -> np.ndarray:
-    """Naive O(N^2) 1D inverse DFT."""
+    """Compute the 1D inverse DFT."""
     X = np.asarray(X, dtype=np.complex128)
     N = X.shape[0]
     x = np.zeros(N, dtype=np.complex128)
@@ -87,8 +87,8 @@ def naive_idft(X: np.ndarray) -> np.ndarray:
 
 def cooley_tukey_fft(x: np.ndarray) -> np.ndarray:
     """
-    Recursive Cooley–Tukey FFT.
-    Assumes len(x) is a power of two.
+    Compute the 1D Fast Fourier Transform (FFT) using the recursive Cooley–Tukey algorithm.
+    Assumes that the len(x) is a power of two.
     """
     x = np.asarray(x, dtype=np.complex128)
     N = x.shape[0]
@@ -98,7 +98,7 @@ def cooley_tukey_fft(x: np.ndarray) -> np.ndarray:
     if N == 1:
         return x.copy()
     if not is_power_of_two(N):
-        raise ValueError(f"cooley_tukey_fft: length {N} is not a power of two")
+        raise ValueError(f"Input length {N} must be a power of two")
 
     even = cooley_tukey_fft(x[0::2])
     odd = cooley_tukey_fft(x[1::2])
@@ -112,7 +112,7 @@ def cooley_tukey_fft(x: np.ndarray) -> np.ndarray:
 
 
 def inverse_fft(X: np.ndarray) -> np.ndarray:
-    """Inverse FFT via conjugate trick: ifft(X) = conj(fft(conj(X))) / N."""
+    """Compute the 1D inverse FFT using the conjugate symmetry method."""
     X = np.asarray(X, dtype=np.complex128)
     N = X.shape[0]
     if N == 0:
@@ -125,14 +125,17 @@ def inverse_fft(X: np.ndarray) -> np.ndarray:
 # 2D transforms
 
 def dft2d(matrix: np.ndarray) -> np.ndarray:
-    """2D DFT via naive 1D DFT on rows then columns."""
+    """
+    Compute the 2D DFT using the naive approach.
+    Applies the 1D DFT first on each row, then on each column of the input matrix.
+    """
     matrix = np.asarray(matrix, dtype=np.complex128)
     h, w = matrix.shape
-    # rows
+    # Apply 1D DFT to each rows
     tmp = np.zeros((h, w), dtype=np.complex128)
     for r in range(h):
         tmp[r, :] = naive_dft(matrix[r, :])
-    # columns
+    # Apply 1D DFT to each columns
     out = np.zeros_like(tmp)
     for c in range(w):
         out[:, c] = naive_dft(tmp[:, c])
@@ -140,7 +143,7 @@ def dft2d(matrix: np.ndarray) -> np.ndarray:
 
 
 def fft2d(matrix: np.ndarray, use_naive: bool = False) -> np.ndarray:
-    """2D DFT via either naive DFT or Cooley–Tukey FFT on rows then columns."""
+    """Compute the 2D DFT."""
     matrix = np.asarray(matrix, dtype=np.complex128)
     h, w = matrix.shape
 
@@ -161,16 +164,16 @@ def fft2d(matrix: np.ndarray, use_naive: bool = False) -> np.ndarray:
 
 
 def ifft2d(matrix: np.ndarray) -> np.ndarray:
-    """2D inverse FFT via inverse 1D FFT on rows then columns."""
+    """Compute the 2D inverse FFT using inverse 1D FFT on rows then columns."""
     matrix = np.asarray(matrix, dtype=np.complex128)
     h, w = matrix.shape
 
-    # First: inverse FFT on rows
+    # Apply 1D inverse FFT to each rows
     out = np.zeros((h, w), dtype=np.complex128)
     for r in range(h):
         out[r, :] = inverse_fft(matrix[r, :])
 
-    # Second: inverse FFT on columns
+    # Apply 1D inverse FFT to each columns
     out2 = np.zeros_like(out)
     for c in range(w):
         out2[:, c] = inverse_fft(out[:, c])
@@ -180,15 +183,14 @@ def ifft2d(matrix: np.ndarray) -> np.ndarray:
 # Image helpers
 
 def load_grayscale_image(path: str) -> np.ndarray:
-    """Load a grayscale image as float64 in [0,1] using PIL."""
+    """Load an image in grayscale and convert it to a normalized NumPy array."""
     img = Image.open(path).convert('L')
     arr = np.array(img, dtype=np.float64) / 255.0
     return arr
 
 
 
-def show_image_pair(left: np.ndarray, right: np.ndarray,
-                    titles=("Original", "FFT (log scale)")):
+def show_image_pair(left: np.ndarray, right: np.ndarray, titles=("Original", "FFT (log scale)")):
     plt.figure(figsize=(10, 5))
     plt.subplot(1, 2, 1)
     plt.imshow(left, cmap='gray', vmin=0, vmax=1)
@@ -196,7 +198,6 @@ def show_image_pair(left: np.ndarray, right: np.ndarray,
     plt.axis('off')
 
     plt.subplot(1, 2, 2)
-    # Add a tiny epsilon so LogNorm is well defined
     eps = 1e-8
     plt.imshow(right + eps, cmap='gray', norm=LogNorm())
     plt.title(titles[1])
@@ -210,19 +211,20 @@ def show_image_pair(left: np.ndarray, right: np.ndarray,
 
 def mode_display_fft(img: np.ndarray, fft_kind: str = 'MS'):
     """
-    Mode 1.
-    Show original image next to log magnitude of its 2D FFT.
-    fft_kind: 'MS' (custom fft2d), 'numpy', or 'both'.
+    Mode 1: Show the original image next to the log-magnitude of its 2D FFT.
+
+    Parameters: 
+    fft_kind: 'MS' for custom fft2d, 'numpy' for NumPy FFT, or 'both' to display both.
     """
     h, w = img.shape
     th, tw = next_power_of_two(h), next_power_of_two(w)
     padded = pad_to_shape(img, (th, tw))
 
-    # How many panels: original + 1 or 2 spectra
+    # To determine the number of panels
     ncols = 3 if fft_kind == 'both' else 2
     plt.figure(figsize=(6 * ncols, 5))
 
-    # Panel 1. original image
+    # Panel 1 is to display the original image
     plt.subplot(1, ncols, 1)
     plt.imshow(img, cmap='gray', vmin=0, vmax=1)
     plt.title("Original image")
@@ -230,22 +232,22 @@ def mode_display_fft(img: np.ndarray, fft_kind: str = 'MS'):
 
     col = 2
 
-    # Custom fft2d, match old "FFT Magnitude Spectrum" look 
+    # Custom fft2d magnitude spectrum 
     if fft_kind in ('MS', 'both'):
         F = fft2d(padded, use_naive=False)
 
-        # log(1 + |F|) 
+        # Compute log-magnitude for better visualization 
         mag_log = np.array([[math.log(1.0 + abs(z)) for z in row] for row in F])
 
-        # shift DC to center
+        # Shift zero-frequency component to center
         mag_shift = fftshift(mag_log)
 
-        # linear normalize to [0,1]
+        # Normalize values to [0,1] for consistent display
         mag_min = mag_shift.min()
         mag_max = mag_shift.max()
         mag_norm = (mag_shift - mag_min) / (mag_max - mag_min + 1e-12)
 
-        # crop back to original size so it matches the paper figure
+        # Crop back to original image size
         mag_norm = mag_norm[:h, :w]
 
         plt.subplot(1, ncols, col)
@@ -256,7 +258,7 @@ def mode_display_fft(img: np.ndarray, fft_kind: str = 'MS'):
         if fft_kind == 'both':
             col += 1
 
-    # NumPy fft2, separate styling (LogNorm etc)
+    # This is the panel for NumPy FFT magnitude spectrum 
     if fft_kind in ('numpy', 'both'):
         F_np = fft2d(padded, use_naive=False)
         mag_np = np.abs(F_np)
@@ -273,14 +275,15 @@ def mode_display_fft(img: np.ndarray, fft_kind: str = 'MS'):
 
 def mode_denoise(img: np.ndarray, cutoff_ratio: float = 0.08):
     """
-    Mode 2.
-    Denoise by low pass filtering in the frequency domain.
-    cutoff_ratio controls radius as a fraction of min dimension.
+    Mode 2: Denoise by low pass filtering in the frequency domain.
+    
+    Parameters:
+    - cutoff_ratio: controls radius as a fraction of min dimension.
     """
     mode_extra_filters(img,
-                   cutoff_pixels=50,    # Adjust this for low/high pass radius
-                   threshold=0,     # Adjust this for magnitude threshold
-                   topk=500)            #
+                   cutoff_pixels=50,    
+                   threshold=0,     
+                   topk=500)           
     h, w = img.shape
     th, tw = next_power_of_two(h), next_power_of_two(w)
     padded = pad_to_shape(img, (th, tw))
@@ -314,10 +317,8 @@ def mode_denoise(img: np.ndarray, cutoff_ratio: float = 0.08):
 
 def mode_compress(img: np.ndarray):
     """
-    Mode 3.
-    Compress by keeping only the largest Fourier coefficients by magnitude.
-    Compression levels interpreted as percentage of coefficients set to zero:
-      0, 50, 90, 95, 99, 99.9
+    Mode 3: Compress by keeping only the largest Fourier coefficients by magnitude.
+    Compression levels indicate the percentage of coefficients that are zeroed out: 0, 50, 90, 95, 99, 99.9.
     """
     h, w = img.shape
     th, tw = next_power_of_two(h), next_power_of_two(w)
@@ -336,13 +337,13 @@ def mode_compress(img: np.ndarray):
 
     for level in compression_levels:
         if level == 0:
-            # No compression, keep all coefficients
+            # Keep all coefficients so no compression
             mask = np.ones_like(F, dtype=bool)
         else:
             keep_fraction = 1.0 - (level / 100.0)
             keep_count = max(1, int(round(N * keep_fraction)))
 
-            # threshold so that we keep the keep_count largest magnitudes
+            # To create mask for largest-magnitude coefficients
             thresh = np.partition(mag, -keep_count)[-keep_count]
             mask = np.abs(F) >= thresh
 
@@ -361,7 +362,7 @@ def mode_compress(img: np.ndarray):
         recon_cropped = np.clip(recon_cropped, 0.0, 1.0)
         images.append(recon_cropped)
 
-    # plot 2x3 grid
+    # Plot the image in a 2x3 grid
     plt.figure(figsize=(12, 8))
     for i, level in enumerate(compression_levels):
         plt.subplot(2, 3, i + 1)
@@ -375,10 +376,7 @@ def mode_compress(img: np.ndarray):
     plt.tight_layout()
     plt.show()
 
-def mode_extra_filters(img: np.ndarray,
-                       cutoff_pixels: int = 50,
-                       threshold: float = 1000.0,
-                       topk: int = 500):
+def mode_extra_filters(img: np.ndarray,ccutoff_pixels: int = 50,cthreshold: float = 1000.0, topk: int = 500):
     """
     Show:
       - Low pass filter with radius = cutoff_pixels
@@ -392,12 +390,12 @@ def mode_extra_filters(img: np.ndarray,
     th, tw = next_power_of_two(h), next_power_of_two(w)
     padded = pad_to_shape(img, (th, tw))
 
-    # FFT and shift to center
+    # Compute the FFT and shift zero-frequency to center
     F = fft2d(padded, use_naive=False)
     Fshift = fftshift(F)
     H, W = Fshift.shape
 
-    # Helper to reconstruct an image from a boolean mask in the shifted spectrum
+    # This a helper function to reconstruct image from masked FFT
     def reconstruct(mask: np.ndarray) -> np.ndarray:
         Fmasked = Fshift * mask
         Funshift = ifftshift(Fmasked)
@@ -406,36 +404,36 @@ def mode_extra_filters(img: np.ndarray,
         recon = np.clip(recon, 0.0, 1.0)
         return recon
 
-    # Build radial masks for low pass and high pass
+    # In order to build radial masks for low pass and high pass
     cy, cx = H // 2, W // 2
     Y, X = np.ogrid[:H, :W]
     r2 = (X - cx) ** 2 + (Y - cy) ** 2
     lp_mask = r2 <= cutoff_pixels ** 2
     hp_mask = ~lp_mask
 
-    # 1) Low pass
+    # Apply low pass filter
     img_lp = reconstruct(lp_mask)
 
-    # 2) High pass
+    # Apply high pass filter
     img_hp = reconstruct(hp_mask)
 
-    # 3) Magnitude thresholding
+    # Magnitude thresholding
     mag = np.abs(Fshift)
     th_mask = mag >= threshold
     img_th = reconstruct(th_mask)
 
-    # 4) Keep top-k coefficients by magnitude
+    # Keep top-k coefficients by magnitude
     flat_mag = mag.ravel()
     topk = min(topk, flat_mag.size)
-    kth = np.partition(flat_mag, -topk)[-topk]   # magnitude cutoff
+    kth = np.partition(flat_mag, -topk)[-topk]  
     top_mask = mag >= kth
     img_top = reconstruct(top_mask)
 
-    # 5) Low pass and threshold combined
+    # Combine the low pass and threshold mask
     combined_mask = lp_mask & th_mask
     img_combined = reconstruct(combined_mask)
 
-    # Plot 6 panels
+    # Plot all 6 panels in a single figure
     fig, axes = plt.subplots(1, 6, figsize=(18, 4))
 
     axes[0].imshow(img, cmap="gray", vmin=0, vmax=1)
@@ -468,15 +466,12 @@ def mode_extra_filters(img: np.ndarray,
 
 def mode_runtime_plot(max_power: int = 8, trials: int = 10):
     """
-    Mode 4.
-    Measure and plot runtime of naive 2D DFT and FFT for N x N matrices.
-    Problem sizes are powers of two from 2^3 up to 2^8 (that is, max 256 x 256).
-    The max_power argument is capped at 8 to avoid larger sizes.
+    Mode 4: Measure and plot runtime of naive 2D DFT and FFT for N x N matrices.
+    Problem sizes are powers of two from 2^3 up to 2^8 (so max 256 x 256).
     """
-    # Hard cap at 2^8 = 256
+    # Limit the maximum size to 256 x 256
     max_power = min(max_power, 8)
 
-    # Problem sizes: 2^3, 2^4, ..., 2^max_power
     sizes = [2 ** p for p in range(3, max_power + 1)]
 
     naive_means, naive_stds = [], []
@@ -490,17 +485,17 @@ def mode_runtime_plot(max_power: int = 8, trials: int = 10):
         fft_times = []
 
         for run in range(trials):
-            # Random complex matrix
+            # To start generate a random complex matrix
             A = np.random.randn(N, N) + 1j * np.random.randn(N, N)
 
-            # Naive 2D DFT
+            # Measure the runtime of naive 2D DFT
             start = time.time()
             _ = fft2d(A, use_naive=True)
             end = time.time()
             naive_times.append(end - start)
             print(f"  Run {run + 1} naive: {naive_times[-1]:.4f} s")
 
-            # FFT 2D
+            # Measure the runtime of FFT 2D
             start = time.time()
             _ = fft2d(A, use_naive=False)
             end = time.time()
@@ -523,7 +518,6 @@ def mode_runtime_plot(max_power: int = 8, trials: int = 10):
         print(f"Naive DFT2D  - mean {naive_mean:.4e} s, std {naive_std:.4e} s")
         print(f"FFT2D       - mean {fft_mean:.4e} s, std {fft_std:.4e} s")
 
-    # Plot like your reference figure
     plt.figure(figsize=(10, 6))
     plt.errorbar(
         sizes,
@@ -545,7 +539,6 @@ def mode_runtime_plot(max_power: int = 8, trials: int = 10):
     plt.xscale("log", base=2)
     plt.yscale("log")
 
-    # x tick labels: 2^3, 2^4, ...
     plt.xticks(sizes, [f"$2^{int(math.log2(n))}$" for n in sizes])
 
     plt.xlabel("Problem Size (N)")
@@ -557,7 +550,7 @@ def mode_runtime_plot(max_power: int = 8, trials: int = 10):
     plt.show()
 
 
-# CLI
+# The Command Line Interface Implementation
 
 def main():
     parser = argparse.ArgumentParser(description="FFT assignment tool")
